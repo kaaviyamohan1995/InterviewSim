@@ -1,0 +1,8 @@
+# Ignore virtual environments
+venv/
+
+# Ignore datasets
+Datasets/
+*.csv
+*.json
+*.jsonl
