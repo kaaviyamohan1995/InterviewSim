@@ -1,6 +1,10 @@
 import gradio as gr
 from Interviewer_agent import interview_agent, begin_interview
 
+# Helper to stop interview
+def stop_interview():
+    return [], [], "🛑 Interview stopped. Restart to begin again."
+
 def start_interview(api_key):
     if not api_key:
         return gr.update(visible=False), [], "⚠️ Please enter your OpenAI API key."
@@ -20,11 +24,20 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         msg = gr.Textbox(label="✍️ Your Answer")
         state = gr.State([])
         submit = gr.Button("Submit Answer")
+        stop_btn = gr.Button("🛑 Stop Interview", variant="secondary")
 
+        # Submit answer → continue interview
         submit.click(
             interview_agent,
             [msg, state, api_key, resume_box, jd_box],
             [chatbot, state]
+        )
+
+        # Stop interview → clear chat and reset
+        stop_btn.click(
+            stop_interview,
+            [],
+            [chatbot, state, status]
         )
 
     # First click: reveal UI
