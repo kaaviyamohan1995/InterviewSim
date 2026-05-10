@@ -1,32 +1,56 @@
 from openai import OpenAI
+from Profile_Manager import format_profile_for_prompt
 
-def interview_agent(user_input, history, api_key, resume_text, job_description, round_number=1, user_name=None):
+
+# ---------------------------
+# INTERVIEW AGENT
+# ---------------------------
+def interview_agent(
+    user_input,
+    state,
+    api_key,
+    resume_profile,
+    job_description
+):
     client = OpenAI(api_key=api_key)
 
-    # Stop interview if user types "stop"
-    if user_input and user_input.lower().strip() in ["stop", "quit", "end interview"]:
-        history.append({"role": "assistant", "content": "🛑 Interview stopped. Thank you!"})
-        return history, history
+    # safety state
+    if not isinstance(state, dict):
+        state = {"round": 1, "step": 0}
 
-    # Build system prompt with resume + JD context
+    round_map = {
+        1: "Behavioral (Introduction & background)",
+        2: "Technical (based on resume + job description)",
+        3: "HR / Soft skills"
+    }
+
+    current_round = state.get("round", 1)
+    step = state.get("step", 0)
+
+    profile_text = format_profile_for_prompt(resume_profile)
+
     system_prompt = f"""
-You are a professional interviewer.
-- Conduct a structured interview in 3 rounds.
-- Round 1: Behavioral (intro).
-- Round 2: Technical (based on resume + job description).
-- Round 3: HR/soft skills.
-- Ask exactly ONE question at a time.
-- After each answer, give short constructive feedback.
-- After Round 3, provide a final summary (strengths, gaps, verdict).
+You are a senior RFIC interviewer.
 
-Resume:
-{resume_text}
+STRICT RULES:
+- Ask ONLY ONE question
+- No multiple questions
+- No tutoring style
 
-Job Description:
+Round: {current_round} - {round_map[current_round]}
+Step: {step}
+
+PROFILE:
+{profile_text}
+
+JOB:
 {job_description}
 """
 
-    messages = [{"role": "system", "content": system_prompt}] + history
+    messages = [{"role": "system", "content": system_prompt}]
+
+    if isinstance(state.get("history", []), list):
+        messages += state["history"]
 
     if user_input:
         messages.append({"role": "user", "content": user_input})
@@ -38,25 +62,42 @@ Job Description:
 
     answer = response.choices[0].message.content
 
-    # Update history
+    # init history if missing
+    if "history" not in state:
+        state["history"] = []
+
     if user_input:
-        history.append({"role": "user", "content": user_input})
-    history.append({"role": "assistant", "content": answer})
+        state["history"].append({"role": "user", "content": user_input})
+        state["step"] = step + 1
 
-    return history, history
+    state["history"].append({"role": "assistant", "content": answer})
 
+    # round transition
+    if state["step"] >= 3 and state["round"] < 3:
+        state["round"] += 1
+        state["step"] = 0
 
-def begin_interview(api_key, resume_text, job_description):
-    if not api_key:
-        return [], "⚠️ Please enter your OpenAI API key."
+    return state["history"], state, ""
+    
 
+# ---------------------------
+# BEGIN INTERVIEW
+# ---------------------------
+def begin_interview(api_key, resume_profile, job_description):
     client = OpenAI(api_key=api_key)
 
+    profile_text = format_profile_for_prompt(resume_profile)
+
     system_prompt = f"""
-You are a professional interviewer.
-Start the interview with a greeting and ONE behavioral question:
-- Ask the candidate to introduce themselves.
-- Capture their name for later rounds.
+Start interview.
+
+Ask ONLY ONE behavioral question.
+
+PROFILE:
+{profile_text}
+
+JOB:
+{job_description}
 """
 
     response = client.chat.completions.create(
@@ -65,10 +106,20 @@ Start the interview with a greeting and ONE behavioral question:
     )
 
     first_question = response.choices[0].message.content
-    history = [{"role": "assistant", "content": first_question}]
-    return history, "✅ Interview started. Please answer the first question below."
+
+    state = {
+        "round": 1,
+        "step": 0,
+        "history": [
+            {"role": "assistant", "content": first_question}
+        ]
+    }
+
+    return state["history"], state, "✅ Interview started"
 
 
+# ---------------------------
+# STOP
+# ---------------------------
 def stop_interview():
-    """Helper to stop interview via button in Gradio UI"""
-    return [], [], "🛑 Interview stopped. Restart to begin again."
+    return [], {"round": 1, "step": 0, "history": []}, "🛑 Stopped"

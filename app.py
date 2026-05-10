@@ -1,57 +1,63 @@
 import gradio as gr
 from Interviewer_agent import interview_agent, begin_interview
+from Resume_Parser import parse_resume
 
-# Helper to stop interview
-def stop_interview():
-    return [], [], "🛑 Interview stopped. Restart to begin again."
 
 def start_interview(api_key):
     if not api_key:
-        return gr.update(visible=False), [], "⚠️ Please enter your OpenAI API key."
-    return gr.update(visible=True), [], "✅ Key accepted. Paste resume & JD, then click Start Interview."
+        return "⚠️ Enter API key", gr.update(), gr.update()
 
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 🎉 Interview Simulator Agent")
+    return "✅ Ready", gr.update(visible=False), gr.update(visible=True)
 
-    api_key = gr.Textbox(label="🔑 API Key", type="password")
-    resume_box = gr.Textbox(label="📄 Resume", lines=6)
-    jd_box = gr.Textbox(label="📝 Job Description", lines=6)
-    status = gr.Label()
-    start_btn = gr.Button("🚀 Start Interview")
 
-    with gr.Group(visible=False) as interview_ui:
-        chatbot = gr.Chatbot(label="💬 Interview Chat", value=[])
-        msg = gr.Textbox(label="✍️ Your Answer")
-        state = gr.State([])
-        submit = gr.Button("Submit Answer")
-        stop_btn = gr.Button("🛑 Stop Interview", variant="secondary")
+def stop_interview():
+    return [], {"round": 1, "step": 0, "history": []}, "🛑 Stopped", gr.update(visible=True), gr.update(visible=False)
 
-        # Submit answer → continue interview
-        submit.click(
-            interview_agent,
-            [msg, state, api_key, resume_box, jd_box],
-            [chatbot, state]
-        )
 
-        # Stop interview → clear chat and reset
-        stop_btn.click(
-            stop_interview,
-            [],
-            [chatbot, state, status]
-        )
+with gr.Blocks() as demo:
 
-    # First click: reveal UI
-    start_btn.click(
-        start_interview,
-        [api_key],
-        [interview_ui, chatbot, status]
+    gr.Markdown("# Interview Simulator")
+
+    with gr.Column(visible=True) as start_page:
+        api_key = gr.Textbox(type="password")
+        resume = gr.File(type="filepath")
+        jd = gr.Textbox()
+        start_btn = gr.Button("Start")
+
+        resume_profile_state = gr.State()
+
+    with gr.Column(visible=False) as interview_page:
+        chatbot = gr.Chatbot()
+        msg = gr.Textbox()
+        state = gr.State({"round": 1, "step": 0, "history": []})
+
+        submit = gr.Button("Send")
+        stop_btn = gr.Button("Stop")
+
+    status = gr.Textbox()
+
+    # switch
+    start_btn.click(start_interview, [api_key], [status, start_page, interview_page])
+
+    # resume parse
+    resume.change(parse_resume, [resume, api_key], [status, resume_profile_state])
+
+    # begin interview
+    start_btn.click(begin_interview, [api_key, resume_profile_state, jd],
+                    [chatbot, state, status])
+
+    # submit answer
+    submit.click(
+        interview_agent,
+        [msg, state, api_key, resume_profile_state, jd],
+        [chatbot, state, msg]
     )
 
-    # Second click: actually start interview with first question
-    start_btn.click(
-        begin_interview,
-        [api_key, resume_box, jd_box],
-        [chatbot, status]
+    # stop
+    stop_btn.click(
+        stop_interview,
+        [],
+        [chatbot, state, status, start_page, interview_page]
     )
 
 demo.launch()
