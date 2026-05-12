@@ -1,5 +1,7 @@
 from openai import OpenAI
-from Profile_Manager import format_profile_for_prompt
+
+from Interviewer_Brain import interview_brain
+from Prompt_Builder import build_dynamic_prompt
 
 
 # ---------------------------
@@ -12,108 +14,173 @@ def interview_agent(
     resume_profile,
     job_description
 ):
+
     client = OpenAI(api_key=api_key)
 
-    # safety state
+    # ---------------------------
+    # STATE INIT
+    # ---------------------------
     if not isinstance(state, dict):
-        state = {"round": 1, "step": 0}
+        state = {}
 
-    round_map = {
-        1: "Behavioral (Introduction & background)",
-        2: "Technical (based on resume + job description)",
-        3: "HR / Soft skills"
-    }
+    state.setdefault("round", 1)
+    state.setdefault("step", 0)
+    state.setdefault("history", [])
 
-    current_round = state.get("round", 1)
-    step = state.get("step", 0)
+    state.setdefault("topics_asked", [])
+    state.setdefault("concepts_covered", [])
+    state.setdefault("question_types", [])
 
-    profile_text = format_profile_for_prompt(resume_profile)
+    # ---------------------------
+    # SAFETY RESUME PROFILE
+    # ---------------------------
+    if not resume_profile:
+        resume_profile = {
+            "interview_concepts": {}
+        }
 
-    system_prompt = f"""
-You are a senior RFIC interviewer.
+    # ---------------------------
+    # INTERVIEW BRAIN
+    # ---------------------------
+    brain_output = interview_brain(
+        resume_profile,
+        job_description or "",
+        state
+    )
 
-STRICT RULES:
-- Ask ONLY ONE question
-- No multiple questions
-- No tutoring style
+    # ---------------------------
+    # PROMPT BUILDING
+    # ---------------------------
+    system_prompt = build_dynamic_prompt(
+        resume_profile,
+        job_description or "",
+        brain_output,
+        state
+    )
 
-Round: {current_round} - {round_map[current_round]}
-Step: {step}
+    # ---------------------------
+    # MESSAGE HISTORY
+    # ---------------------------
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt
+        }
+    ]
 
-PROFILE:
-{profile_text}
-
-JOB:
-{job_description}
-"""
-
-    messages = [{"role": "system", "content": system_prompt}]
-
-    if isinstance(state.get("history", []), list):
-        messages += state["history"]
+    messages += state["history"]
 
     if user_input:
-        messages.append({"role": "user", "content": user_input})
+        messages.append({
+            "role": "user",
+            "content": user_input
+        })
 
+    # ---------------------------
+    # GPT CALL
+    # ---------------------------
     response = client.chat.completions.create(
         model="gpt-4",
         messages=messages
     )
 
-    answer = response.choices[0].message.content
+    output = response.choices[0].message.content
 
-    # init history if missing
-    if "history" not in state:
-        state["history"] = []
-
+    # ---------------------------
+    # UPDATE STATE
+    # ---------------------------
     if user_input:
-        state["history"].append({"role": "user", "content": user_input})
-        state["step"] = step + 1
+        state["history"].append({
+            "role": "user",
+            "content": user_input
+        })
+        state["step"] += 1
 
-    state["history"].append({"role": "assistant", "content": answer})
+    state["history"].append({
+        "role": "assistant",
+        "content": output
+    })
 
-    # round transition
+    # ---------------------------
+    # ROUND TRANSITION
+    # ---------------------------
     if state["step"] >= 3 and state["round"] < 3:
         state["round"] += 1
         state["step"] = 0
 
     return state["history"], state, ""
-    
+
 
 # ---------------------------
 # BEGIN INTERVIEW
 # ---------------------------
-def begin_interview(api_key, resume_profile, job_description):
+def begin_interview(
+    api_key,
+    resume_profile,
+    job_description
+):
+
     client = OpenAI(api_key=api_key)
 
-    profile_text = format_profile_for_prompt(resume_profile)
+    # ---------------------------
+    # INITIAL STATE
+    # ---------------------------
+    state = {
+        "round": 1,
+        "step": 0,
+        "history": [],
 
-    system_prompt = f"""
-Start interview.
+        "topics_asked": [],
+        "concepts_covered": [],
+        "question_types": []
+    }
 
-Ask ONLY ONE behavioral question.
+    # ---------------------------
+    # SAFETY PROFILE
+    # ---------------------------
+    if not resume_profile:
+        resume_profile = {
+            "interview_concepts": {}
+        }
 
-PROFILE:
-{profile_text}
+    # ---------------------------
+    # BRAIN INIT
+    # ---------------------------
+    brain_output = interview_brain(
+        resume_profile,
+        job_description or "",
+        state
+    )
 
-JOB:
-{job_description}
-"""
+    # ---------------------------
+    # PROMPT
+    # ---------------------------
+    system_prompt = build_dynamic_prompt(
+        resume_profile,
+        job_description or "",
+        brain_output,
+        state
+    )
 
+    # ---------------------------
+    # FIRST QUESTION
+    # ---------------------------
     response = client.chat.completions.create(
         model="gpt-4",
-        messages=[{"role": "system", "content": system_prompt}]
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt
+            }
+        ]
     )
 
     first_question = response.choices[0].message.content
 
-    state = {
-        "round": 1,
-        "step": 0,
-        "history": [
-            {"role": "assistant", "content": first_question}
-        ]
-    }
+    state["history"].append({
+        "role": "assistant",
+        "content": first_question
+    })
 
     return state["history"], state, "✅ Interview started"
 
@@ -122,4 +189,16 @@ JOB:
 # STOP
 # ---------------------------
 def stop_interview():
-    return [], {"round": 1, "step": 0, "history": []}, "🛑 Stopped"
+
+    return (
+        [],
+        {
+            "round": 1,
+            "step": 0,
+            "history": [],
+            "topics_asked": [],
+            "concepts_covered": [],
+            "question_types": []
+        },
+        "🛑 Stopped"
+    )
