@@ -13,44 +13,147 @@ from Resume_Parser import parse_resume
 # ---------------------------
 # ANALYSIS FUNCTION
 # ---------------------------
-def generate_report(state):
+from openai import OpenAI
+
+
+def generate_report(
+    state,
+    api_key,
+    resume_profile,
+    job_description
+):
+
+    if not api_key:
+        return "❌ API Key missing"
 
     history = state.get("history", [])
 
-    questions = len([
-        m for m in history
-        if m["role"] == "assistant"
-    ])
+    if not history:
+        return "❌ No interview history found"
 
-    answers = len([
-        m for m in history
-        if m["role"] == "user"
-    ])
+    client = OpenAI(api_key=api_key)
 
-    return f"""
-# 📊 Interview Report
+    # ---------------------------
+    # BUILD CONVERSATION
+    # ---------------------------
+    conversation = ""
 
-## Summary
-- Questions Asked: {questions}
-- Answers Given: {answers}
-- Rounds Completed: {state.get('round', 1)}
+    for msg in history:
+
+        role = msg["role"]
+
+        if role == "assistant":
+            role = "Interviewer"
+
+        elif role == "user":
+            role = "Candidate"
+
+        conversation += (
+            f"{role}: "
+            f"{msg['content']}\n\n"
+        )
+
+    # ---------------------------
+    # DYNAMIC ROLE CONTEXT
+    # ---------------------------
+    resume_context = str(resume_profile)
+
+    jd_context = (
+        job_description
+        if job_description
+        else "No job description provided"
+    )
+
+    # ---------------------------
+    # DYNAMIC EVALUATION PROMPT
+    # ---------------------------
+    prompt = f"""
+You are an expert hiring manager.
+
+Your task is to evaluate a candidate's interview performance.
+
+IMPORTANT:
+- Infer the job domain dynamically using:
+    1. Resume profile
+    2. Job description
+    3. Interview questions
+
+- DO NOT assume semiconductor,
+  software, AI, or any specific domain.
+
+- Adapt evaluation categories
+  according to the role.
+
+Example:
+If software role:
+    - coding
+    - system design
+    - debugging
+
+If RF/Validation role:
+    - RF knowledge
+    - silicon validation
+    - debugging
+    - automation
+
+If AI/ML role:
+    - ML fundamentals
+    - modeling
+    - problem solving
+
+Evaluate ONLY based on
+candidate responses.
+
+Resume Profile:
+{resume_context}
+
+Job Description:
+{jd_context}
+
+Interview:
+{conversation}
+
+Provide output in markdown format:
+
+# 📊 Interview Performance Analysis
+
+## Role Detected
+(Detected role)
+
+## Overall Score
+(X.X / 10)
+
+## Category Scores
+| Category | Score |
+|-----------|-------|
+| Skill | X |
 
 ## Strengths
-- RF / System understanding
-- Validation experience
-- Debugging exposure
+- point
+- point
 
 ## Improvement Areas
-- Structured explanations
-- Deeper technical clarity
+- point
+- point
 
-## Score
-8.4 / 10
+## Interview Summary
+(summary)
 
-## Verdict
-Strong candidate for next technical round.
+## Final Verdict
+(Hire / Hold / Reject)
 """
 
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    return response.choices[0].message.content
 
 # ---------------------------
 # START FLOW
@@ -312,19 +415,19 @@ with gr.Blocks() as demo:
     # PERFORMANCE ANALYSIS
     # -----------------------
     analysis_btn.click(
-        generate_report,
-        [state],
-        report
+    generate_report,
+    [state, api_key, resume_state, jd],
+    report
     ).then(
-        lambda: (
-            gr.update(visible=False),
-            gr.update(visible=True)
-        ),
-        None,
-        [
-            interview_page,
-            analysis_page
-        ]
+    lambda: (
+        gr.update(visible=False),
+        gr.update(visible=True)
+    ),
+    None,
+    [
+        interview_page,
+        analysis_page
+    ]
     )
 
     # -----------------------
