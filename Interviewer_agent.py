@@ -5,7 +5,7 @@ from Prompt_Builder import build_dynamic_prompt
 
 
 # ---------------------------
-# INTERVIEW AGENT
+# INTERVIEW AGENT (MAIN LOOP)
 # ---------------------------
 def interview_agent(
     user_input,
@@ -18,7 +18,7 @@ def interview_agent(
     client = OpenAI(api_key=api_key)
 
     # ---------------------------
-    # STATE INIT
+    # SAFE STATE INIT
     # ---------------------------
     if not isinstance(state, dict):
         state = {}
@@ -26,55 +26,47 @@ def interview_agent(
     state.setdefault("round", 1)
     state.setdefault("step", 0)
     state.setdefault("history", [])
-
     state.setdefault("topics_asked", [])
     state.setdefault("concepts_covered", [])
     state.setdefault("question_types", [])
+    state.setdefault("started", False)
+
+    job_description = job_description or ""
+    resume_profile = resume_profile or {"interview_concepts": {}}
 
     # ---------------------------
-    # SAFETY RESUME PROFILE
+    # STOP SAFETY GUARD
     # ---------------------------
-    if not resume_profile:
-        resume_profile = {
-            "interview_concepts": {}
-        }
+    if not state.get("started"):
+        return begin_interview(api_key, resume_profile, job_description)
 
     # ---------------------------
     # INTERVIEW BRAIN
     # ---------------------------
     brain_output = interview_brain(
         resume_profile,
-        job_description or "",
+        job_description,
         state
     )
 
     # ---------------------------
-    # PROMPT BUILDING
+    # DYNAMIC PROMPT
     # ---------------------------
     system_prompt = build_dynamic_prompt(
         resume_profile,
-        job_description or "",
+        job_description,
         brain_output,
         state
     )
 
     # ---------------------------
-    # MESSAGE HISTORY
+    # BUILD MESSAGES
     # ---------------------------
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt
-        }
-    ]
-
+    messages = [{"role": "system", "content": system_prompt}]
     messages += state["history"]
 
     if user_input:
-        messages.append({
-            "role": "user",
-            "content": user_input
-        })
+        messages.append({"role": "user", "content": user_input})
 
     # ---------------------------
     # GPT CALL
@@ -104,75 +96,53 @@ def interview_agent(
     # ---------------------------
     # ROUND TRANSITION
     # ---------------------------
-    if state["step"] >= 3 and state["round"] < 3:
-        state["round"] += 1
+    if state["step"] >= 3:
+        state["round"] = min(state["round"] + 1, 3)
         state["step"] = 0
 
     return state["history"], state, ""
 
 
 # ---------------------------
-# BEGIN INTERVIEW
+# BEGIN INTERVIEW (ONLY ONCE)
 # ---------------------------
-def begin_interview(
-    api_key,
-    resume_profile,
-    job_description
-):
+def begin_interview(api_key, resume_profile, job_description):
 
     client = OpenAI(api_key=api_key)
 
-    # ---------------------------
-    # INITIAL STATE
-    # ---------------------------
     state = {
         "round": 1,
         "step": 0,
         "history": [],
-
         "topics_asked": [],
         "concepts_covered": [],
-        "question_types": []
+        "question_types": [],
+        "started": True
     }
 
-    # ---------------------------
-    # SAFETY PROFILE
-    # ---------------------------
-    if not resume_profile:
-        resume_profile = {
-            "interview_concepts": {}
-        }
+    job_description = job_description or ""
+    resume_profile = resume_profile or {"interview_concepts": {}}
 
     # ---------------------------
-    # BRAIN INIT
+    # OPENING PROMPT (FIXED)
     # ---------------------------
-    brain_output = interview_brain(
-        resume_profile,
-        job_description or "",
-        state
-    )
+    system_prompt = system_prompt = """
+You are a senior technical interviewer.
 
-    # ---------------------------
-    # PROMPT
-    # ---------------------------
-    system_prompt = build_dynamic_prompt(
-        resume_profile,
-        job_description or "",
-        brain_output,
-        state
-    )
+TASK:
+Start the interview with a short greeting and ask ONLY ONE question.
 
-    # ---------------------------
-    # FIRST QUESTION
-    # ---------------------------
+QUESTION RULE:
+- The ONLY question should be: ask the candidate to introduce themselves
+- Do NOT ask any additional technical or follow-up questions
+
+OUTPUT FORMAT:
+- Greeting + single introduction question in one response
+"""
+
     response = client.chat.completions.create(
         model="gpt-4",
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt
-            }
-        ]
+        messages=[{"role": "system", "content": system_prompt}]
     )
 
     first_question = response.choices[0].message.content
@@ -186,19 +156,18 @@ def begin_interview(
 
 
 # ---------------------------
-# STOP
+# STOP INTERVIEW (FULL RESET SAFE)
 # ---------------------------
 def stop_interview():
 
-    return (
-        [],
-        {
-            "round": 1,
-            "step": 0,
-            "history": [],
-            "topics_asked": [],
-            "concepts_covered": [],
-            "question_types": []
-        },
-        "🛑 Stopped"
-    )
+    state = {
+        "round": 1,
+        "step": 0,
+        "history": [],
+        "topics_asked": [],
+        "concepts_covered": [],
+        "question_types": [],
+        "started": False
+    }
+
+    return state, [], "🛑 Stopped"

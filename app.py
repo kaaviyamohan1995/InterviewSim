@@ -10,28 +10,28 @@ from Resume_Parser import parse_resume
 
 
 # ---------------------------
-# START INTERVIEW UI LOGIC
+# START UI LOGIC
 # ---------------------------
 def start_interview(api_key, resume_profile):
 
     if not api_key:
         return (
             "⚠️ Enter API key",
-            gr.update(),
-            gr.update()
+            gr.update(visible=True),   # keep start page
+            gr.update(visible=False)   # hide interview page
         )
 
     if not resume_profile:
         return (
             "⚠️ Upload resume first",
-            gr.update(),
-            gr.update()
+            gr.update(visible=True),
+            gr.update(visible=False)
         )
 
     return (
         "✅ Ready",
-        gr.update(visible=False),
-        gr.update(visible=True)
+        gr.update(visible=False),   # hide start page
+        gr.update(visible=True)     # show interview page
     )
 
 
@@ -58,7 +58,7 @@ with gr.Blocks() as demo:
         )
 
         jd = gr.Textbox(
-            label="Job Description"
+            label="Job Description (Optional)"
         )
 
         start_btn = gr.Button("Start Interview")
@@ -75,9 +75,7 @@ with gr.Blocks() as demo:
 
         chatbot = gr.Chatbot()
 
-        msg = gr.Textbox(
-            label="Your Answer"
-        )
+        msg = gr.Textbox(label="Your Answer")
 
         state = gr.State({
             "round": 1,
@@ -89,7 +87,7 @@ with gr.Blocks() as demo:
         })
 
         submit = gr.Button("Send")
-        stop_btn = gr.Button("Stop")
+        stop_btn = gr.Button("Stop Interview")
 
 
     # ---------------------------
@@ -103,7 +101,7 @@ with gr.Blocks() as demo:
 
 
     # ---------------------------
-    # START BUTTON (ONLY UI SWITCH)
+    # START INTERVIEW
     # ---------------------------
     start_btn.click(
         start_interview,
@@ -113,17 +111,7 @@ with gr.Blocks() as demo:
 
 
     # ---------------------------
-    # BEGIN INTERVIEW (FIRST QUESTION)
-    # ---------------------------
-    start_btn.click(
-        begin_interview,
-        [api_key, resume_profile_state, jd],
-        [chatbot, state, status]
-    )
-
-
-    # ---------------------------
-    # SUBMIT ANSWER
+    # CHAT FLOW
     # ---------------------------
     submit.click(
         interview_agent,
@@ -133,12 +121,28 @@ with gr.Blocks() as demo:
 
 
     # ---------------------------
-    # STOP
+    # STOP INTERVIEW
     # ---------------------------
+    def stop_ui():
+        state_reset, chat_reset, status = stop_interview()
+
+        return (
+            state_reset,
+            chat_reset,
+            status,
+            gr.update(visible=True),   # show start page
+            gr.update(visible=False)   # hide interview page
+        )
+
+
     stop_btn.click(
-        stop_interview,
+        stop_ui,
         [],
-        [chatbot, state, status, start_page, interview_page]
+        [state, chatbot, status, start_page, interview_page]
+    ).then(
+        lambda: "",
+        None,
+        msg
     )
 
 
